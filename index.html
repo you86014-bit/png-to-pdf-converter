@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>PNG to PDF 변환기</title>
+<title>이미지 to PDF 변환기</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -58,6 +58,11 @@
   #dropZone .icon {
     font-size: 48px;
   }
+  #dropZone .hint {
+    color: #999;
+    font-size: 12px;
+    margin-top: 6px;
+  }
   #fileInput { display: none; }
   #fileList {
     margin-top: 24px;
@@ -87,6 +92,14 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+  .file-item .badge {
+    font-size: 11px;
+    font-weight: 700;
+    color: #667eea;
+    background: #e6e8fd;
+    padding: 2px 8px;
+    border-radius: 10px;
   }
   .file-item .remove {
     color: #e74c3c;
@@ -150,14 +163,15 @@
 </head>
 <body>
 <div class="container">
-  <h1>🖼️ PNG → PDF 변환기</h1>
-  <p class="subtitle">PNG 파일을 드래그 앤 드롭하거나 클릭해서 선택하면 바로 PDF로 변환할 수 있습니다.</p>
+  <h1>🖼️ 이미지 → PDF 변환기</h1>
+  <p class="subtitle">PNG 또는 JPG 파일을 드래그 앤 드롭하거나 클릭해서 선택하면 바로 PDF로 변환할 수 있습니다.</p>
 
   <div id="dropZone">
     <div class="icon">📂</div>
-    <p>여기에 PNG 파일을 드래그하거나 클릭하여 선택하세요</p>
+    <p>여기에 이미지를 드래그하거나 클릭하여 선택하세요</p>
+    <div class="hint">PNG, JPG, JPEG 지원 (자동 인식)</div>
   </div>
-  <input type="file" id="fileInput" accept="image/png" multiple>
+  <input type="file" id="fileInput" accept="image/png,image/jpeg,.png,.jpg,.jpeg" multiple>
 
   <div class="option-row">
     <label for="pageSize">페이지 크기:</label>
@@ -190,6 +204,15 @@ const pageSizeSel = document.getElementById('pageSize');
 
 let files = [];
 
+// 파일의 실제 포맷(PNG/JPEG)을 이름/MIME 타입으로 판별
+function detectFormat(file) {
+  const type = (file.type || '').toLowerCase();
+  const name = (file.name || '').toLowerCase();
+  if (type === 'image/png' || name.endsWith('.png')) return 'PNG';
+  if (type === 'image/jpeg' || type === 'image/jpg' || name.endsWith('.jpg') || name.endsWith('.jpeg')) return 'JPEG';
+  return null;
+}
+
 dropZone.addEventListener('click', () => fileInput.click());
 
 dropZone.addEventListener('dragover', (e) => {
@@ -218,21 +241,31 @@ clearBtn.addEventListener('click', () => {
 });
 
 function handleFiles(fileListObj) {
-  const pngFiles = Array.from(fileListObj).filter(f => f.type === 'image/png' || f.name.toLowerCase().endsWith('.png'));
-  if (pngFiles.length === 0) {
-    statusEl.textContent = 'PNG 파일만 업로드할 수 있습니다.';
+  const validFiles = Array.from(fileListObj).filter(f => detectFormat(f) !== null);
+  const skipped = fileListObj.length - validFiles.length;
+
+  if (validFiles.length === 0) {
+    statusEl.textContent = 'PNG 또는 JPG 파일만 업로드할 수 있습니다.';
     statusEl.style.color = '#e74c3c';
     return;
   }
-  pngFiles.forEach(file => {
+
+  validFiles.forEach(file => {
+    const format = detectFormat(file);
     const reader = new FileReader();
     reader.onload = (e) => {
-      files.push({ name: file.name, dataUrl: e.target.result });
+      files.push({ name: file.name, dataUrl: e.target.result, format: format });
       renderList();
     };
     reader.readAsDataURL(file);
   });
-  statusEl.textContent = '';
+
+  if (skipped > 0) {
+    statusEl.textContent = `${skipped}개 파일은 PNG/JPG가 아니라서 제외되었습니다.`;
+    statusEl.style.color = '#e74c3c';
+  } else {
+    statusEl.textContent = '';
+  }
 }
 
 function renderList() {
@@ -243,6 +276,7 @@ function renderList() {
     item.innerHTML = `
       <img src="${f.dataUrl}" alt="${f.name}">
       <div class="name">${f.name}</div>
+      <div class="badge">${f.format}</div>
       <div class="remove" data-idx="${idx}">✕</div>
     `;
     fileListEl.appendChild(item);
@@ -271,25 +305,25 @@ convertBtn.addEventListener('click', async () => {
       const img = await loadImage(files[i].dataUrl);
       const imgW = img.width;
       const imgH = img.height;
+      const imgFormat = files[i].format; // 'PNG' 또는 'JPEG'
 
-      let format = 'a4';
       let orientation = imgW > imgH ? 'l' : 'p';
-      let pageW, pageH;
+      let pageFormat;
 
       if (sizeMode === 'fit') {
-        pageW = imgW;
-        pageH = imgH;
-        format = [pageW, pageH];
+        pageFormat = [imgW, imgH];
+      } else {
+        pageFormat = sizeMode;
       }
 
       if (i === 0) {
         pdf = new jsPDF({
           orientation: orientation,
           unit: 'px',
-          format: sizeMode === 'fit' ? format : sizeMode
+          format: pageFormat
         });
       } else {
-        pdf.addPage(sizeMode === 'fit' ? format : sizeMode, orientation);
+        pdf.addPage(pageFormat, orientation);
       }
 
       const pageWidth = pdf.internal.pageSize.getWidth();
@@ -307,7 +341,8 @@ convertBtn.addEventListener('click', async () => {
       const offsetX = (pageWidth - drawW) / 2;
       const offsetY = (pageHeight - drawH) / 2;
 
-      pdf.addImage(files[i].dataUrl, 'PNG', offsetX, offsetY, drawW, drawH);
+      // 파일 형식에 맞게 addImage 포맷을 자동으로 지정
+      pdf.addImage(files[i].dataUrl, imgFormat, offsetX, offsetY, drawW, drawH);
     }
 
     pdf.save('converted.pdf');
