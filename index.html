@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PNG to PDF 변환기</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+  }
+  .container {
+    background: #ffffff;
+    border-radius: 16px;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+    padding: 40px;
+    max-width: 640px;
+    width: 100%;
+  }
+  h1 {
+    text-align: center;
+    color: #333;
+    font-size: 26px;
+    margin-bottom: 8px;
+  }
+  .subtitle {
+    text-align: center;
+    color: #888;
+    font-size: 14px;
+    margin-bottom: 28px;
+  }
+  #dropZone {
+    border: 3px dashed #a0a8f0;
+    border-radius: 12px;
+    padding: 50px 20px;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.25s ease;
+    background: #f7f8ff;
+  }
+  #dropZone.dragover {
+    background: #eef0ff;
+    border-color: #667eea;
+    transform: scale(1.01);
+  }
+  #dropZone p {
+    color: #555;
+    font-size: 16px;
+    margin-top: 12px;
+  }
+  #dropZone .icon {
+    font-size: 48px;
+  }
+  #fileInput { display: none; }
+  #fileList {
+    margin-top: 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .file-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    background: #f2f3fb;
+    padding: 10px 14px;
+    border-radius: 8px;
+  }
+  .file-item img {
+    width: 48px;
+    height: 48px;
+    object-fit: cover;
+    border-radius: 6px;
+    border: 1px solid #ddd;
+  }
+  .file-item .name {
+    flex: 1;
+    font-size: 14px;
+    color: #333;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .file-item .remove {
+    color: #e74c3c;
+    cursor: pointer;
+    font-weight: bold;
+    font-size: 16px;
+    padding: 4px 8px;
+  }
+  .actions {
+    margin-top: 24px;
+    display: flex;
+    gap: 12px;
+  }
+  button {
+    flex: 1;
+    padding: 14px;
+    border: none;
+    border-radius: 8px;
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  #convertBtn {
+    background: #667eea;
+    color: white;
+  }
+  #convertBtn:hover { background: #5568d3; }
+  #convertBtn:disabled {
+    background: #ccc;
+    cursor: not-allowed;
+  }
+  #clearBtn {
+    background: #eee;
+    color: #555;
+  }
+  #clearBtn:hover { background: #ddd; }
+  #status {
+    margin-top: 16px;
+    text-align: center;
+    font-size: 14px;
+    color: #667eea;
+    font-weight: 600;
+    min-height: 20px;
+  }
+  .option-row {
+    margin-top: 18px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    font-size: 14px;
+    color: #555;
+  }
+  select {
+    padding: 6px 10px;
+    border-radius: 6px;
+    border: 1px solid #ccc;
+  }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>🖼️ PNG → PDF 변환기</h1>
+  <p class="subtitle">PNG 파일을 드래그 앤 드롭하거나 클릭해서 선택하면 바로 PDF로 변환할 수 있습니다.</p>
+
+  <div id="dropZone">
+    <div class="icon">📂</div>
+    <p>여기에 PNG 파일을 드래그하거나 클릭하여 선택하세요</p>
+  </div>
+  <input type="file" id="fileInput" accept="image/png" multiple>
+
+  <div class="option-row">
+    <label for="pageSize">페이지 크기:</label>
+    <select id="pageSize">
+      <option value="a4">A4</option>
+      <option value="letter">Letter</option>
+      <option value="fit">이미지 크기에 맞춤</option>
+    </select>
+  </div>
+
+  <div id="fileList"></div>
+
+  <div class="actions">
+    <button id="clearBtn">전체 삭제</button>
+    <button id="convertBtn" disabled>PDF로 변환</button>
+  </div>
+
+  <div id="status"></div>
+</div>
+
+<script>
+const { jsPDF } = window.jspdf;
+const dropZone = document.getElementById('dropZone');
+const fileInput = document.getElementById('fileInput');
+const fileListEl = document.getElementById('fileList');
+const convertBtn = document.getElementById('convertBtn');
+const clearBtn = document.getElementById('clearBtn');
+const statusEl = document.getElementById('status');
+const pageSizeSel = document.getElementById('pageSize');
+
+let files = [];
+
+dropZone.addEventListener('click', () => fileInput.click());
+
+dropZone.addEventListener('dragover', (e) => {
+  e.preventDefault();
+  dropZone.classList.add('dragover');
+});
+
+dropZone.addEventListener('dragleave', () => {
+  dropZone.classList.remove('dragover');
+});
+
+dropZone.addEventListener('drop', (e) => {
+  e.preventDefault();
+  dropZone.classList.remove('dragover');
+  handleFiles(e.dataTransfer.files);
+});
+
+fileInput.addEventListener('change', (e) => {
+  handleFiles(e.target.files);
+  fileInput.value = '';
+});
+
+clearBtn.addEventListener('click', () => {
+  files = [];
+  renderList();
+});
+
+function handleFiles(fileListObj) {
+  const pngFiles = Array.from(fileListObj).filter(f => f.type === 'image/png' || f.name.toLowerCase().endsWith('.png'));
+  if (pngFiles.length === 0) {
+    statusEl.textContent = 'PNG 파일만 업로드할 수 있습니다.';
+    statusEl.style.color = '#e74c3c';
+    return;
+  }
+  pngFiles.forEach(file => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      files.push({ name: file.name, dataUrl: e.target.result });
+      renderList();
+    };
+    reader.readAsDataURL(file);
+  });
+  statusEl.textContent = '';
+}
+
+function renderList() {
+  fileListEl.innerHTML = '';
+  files.forEach((f, idx) => {
+    const item = document.createElement('div');
+    item.className = 'file-item';
+    item.innerHTML = `
+      <img src="${f.dataUrl}" alt="${f.name}">
+      <div class="name">${f.name}</div>
+      <div class="remove" data-idx="${idx}">✕</div>
+    `;
+    fileListEl.appendChild(item);
+  });
+  document.querySelectorAll('.remove').forEach(el => {
+    el.addEventListener('click', (e) => {
+      const idx = parseInt(e.target.dataset.idx);
+      files.splice(idx, 1);
+      renderList();
+    });
+  });
+  convertBtn.disabled = files.length === 0;
+}
+
+convertBtn.addEventListener('click', async () => {
+  if (files.length === 0) return;
+  statusEl.style.color = '#667eea';
+  statusEl.textContent = '변환 중입니다...';
+  convertBtn.disabled = true;
+
+  try {
+    const sizeMode = pageSizeSel.value;
+    let pdf;
+
+    for (let i = 0; i < files.length; i++) {
+      const img = await loadImage(files[i].dataUrl);
+      const imgW = img.width;
+      const imgH = img.height;
+
+      let format = 'a4';
+      let orientation = imgW > imgH ? 'l' : 'p';
+      let pageW, pageH;
+
+      if (sizeMode === 'fit') {
+        pageW = imgW;
+        pageH = imgH;
+        format = [pageW, pageH];
+      }
+
+      if (i === 0) {
+        pdf = new jsPDF({
+          orientation: orientation,
+          unit: 'px',
+          format: sizeMode === 'fit' ? format : sizeMode
+        });
+      } else {
+        pdf.addPage(sizeMode === 'fit' ? format : sizeMode, orientation);
+      }
+
+      const pageWidth = pdf.internal.pageSize.getWidth();
+      const pageHeight = pdf.internal.pageSize.getHeight();
+
+      let drawW, drawH;
+      if (sizeMode === 'fit') {
+        drawW = pageWidth;
+        drawH = pageHeight;
+      } else {
+        const ratio = Math.min(pageWidth / imgW, pageHeight / imgH);
+        drawW = imgW * ratio;
+        drawH = imgH * ratio;
+      }
+      const offsetX = (pageWidth - drawW) / 2;
+      const offsetY = (pageHeight - drawH) / 2;
+
+      pdf.addImage(files[i].dataUrl, 'PNG', offsetX, offsetY, drawW, drawH);
+    }
+
+    pdf.save('converted.pdf');
+    statusEl.style.color = '#2ecc71';
+    statusEl.textContent = '✅ 변환 완료! PDF가 다운로드되었습니다.';
+  } catch (err) {
+    statusEl.style.color = '#e74c3c';
+    statusEl.textContent = '오류가 발생했습니다: ' + err.message;
+    console.error(err);
+  } finally {
+    convertBtn.disabled = false;
+  }
+});
+
+function loadImage(dataUrl) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = reject;
+    img.src = dataUrl;
+  });
+}
+</script>
+</body>
+</html>
